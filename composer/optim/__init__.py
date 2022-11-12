@@ -22,6 +22,7 @@ from composer.optim.scheduler import (ComposerScheduler, ConstantScheduler, Cons
 
 __all__ = [
     'DecoupledAdamW',
+    'DecoupledLAMB',
     'DecoupledSGDW',
     'ComposerScheduler',
     'ConstantScheduler',
