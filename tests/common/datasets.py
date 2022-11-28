@@ -122,3 +122,50 @@ class RandomTextClassificationDataset(torch.utils.data.Dataset):
             return {'input_ids': x, 'labels': y}
         else:
             return x, y
+
+
+
+class RandomCausalLMDataset(torch.utils.data.Dataset):
+    """ Text classification dataset with values (just input token ids) drawn uniformly
+    Args:
+        vocab_size (int): vocab size to use (default: 10)
+        size (int): number of samples (default: 100)
+        sequence_length (int): sequence length to use, all sequences will be of this length with no padding (default: 8)
+    """
+
+    def __init__(self,
+                 size: int = 100,
+                 vocab_size: int = 10,
+                 sequence_length: int = 8):
+        self.vocab_size = vocab_size
+        self.sequence_length = sequence_length
+
+        self.input_key = 'input_ids'
+        self.label_key = 'labels'
+        self.attention_mask_key = 'attention_mask'
+
+        self.size = size
+        self.x = None
+        self.y = None
+
+        super().__init__()
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, index: int):
+        if self.x is None:
+            self.x = torch.randint(low=0, high=self.vocab_size, size=(self.size, self.sequence_length))
+        if self.y is None:
+            targets = torch.roll(self.x, shifts=-1)
+            targets[:, -1] = -100
+            self.y = targets
+            self.attention_mask = torch.zeros((self.size, self.sequence_length))
+            self.attention_mask[:, -1] = 1
+
+        x = self.x[index]
+        y = self.y[index]
+        a = self.attention_mask[index]
+
+        return {'input_ids': x, 'labels': y, 'attention_mask': a}
+        
