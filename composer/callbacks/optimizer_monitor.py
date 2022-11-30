@@ -79,7 +79,7 @@ class OptimizerMonitor(Callback):
 
                 param_grad_norm = param_grad_norm**2
                 norm += param_grad_norm
-                metric_reporter = getattr(state.optimizers[0], "report_per_parameter_metrics", None)
+                metric_reporter = getattr(state.optimizers[0], 'report_per_parameter_metrics', None)
                 if callable(metric_reporter) and self.log_optimizer_metrics:
                     optimizer_metrics = metric_reporter(p, name, optimizer_metrics)
 
