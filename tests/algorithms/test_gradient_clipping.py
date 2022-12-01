@@ -1,6 +1,7 @@
 # Copyright 2022 MosaicML Composer authors
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
 from unittest.mock import Mock
 
 import pytest
@@ -76,7 +77,7 @@ def test_gradient_clipping_functional(monkeypatch):
     new_gc_fn.assert_called_once()
 
 
-@pytest.mark.parametrize('clipping_type', [('adaptive',), ('norm',), ('value',)])
+@pytest.mark.parametrize('clipping_type', ['adaptive', 'norm', 'value', 'online_percentile_estimate'])
 def test_gradient_clipping_algorithm(monkeypatch, clipping_type, simple_model_with_grads, dummy_state: State):
     model = simple_model_with_grads
     apply_gc_fn = Mock()
@@ -236,3 +237,21 @@ def test_get_clipped_gradients_4D():
     clipped_grads = grad * _get_clipped_gradient_coeff(
         weights=weights, grad=grad, clipping_threshold=clipping_threshold)
     assert torch.equal(clipped_grads, expected)
+
+
+##### Tests specific to online percentile estimate grad clipping #####
+@pytest.mark.parametrize('norm_type', ['unitwise', 'param'])
+def test_gradient_ope_clipping_algorithm(norm_type, simple_model_with_grads, dummy_state: State):
+    clipping_type = 'online_percentile_estimate'
+    state = dummy_state
+    state.model = simple_model_with_grads
+    state.callbacks = []
+    state.algorithms = [
+        GradientClipping(clipping_type=clipping_type, clipping_threshold=0.8, norm_type=norm_type, warmup_steps=10)
+    ]
+    logger = Mock()
+    engine = Engine(state, logger)
+
+    # Run the Event that should cause gradient_clipping.apply to be called.
+    for _ in range(50):
+        engine.run_event(Event.AFTER_TRAIN_BATCH)

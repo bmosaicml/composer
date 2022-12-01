@@ -10,6 +10,8 @@ from typing import Iterable, Optional, Union
 
 import torch
 
+from composer.algorithms.gradient_clipping.online_percentile_gradient_clipping import apply_ope_gc
+from composer.algorithms.gradient_clipping.utils import unitwise_norm
 from composer.core import Algorithm, Event, State
 from composer.loggers import Logger
 
@@ -19,7 +21,7 @@ __all__ = ['GradientClipping', 'apply_gradient_clipping']
 
 
 def apply_gradient_clipping(parameters: Union[torch.Tensor, Iterable[torch.Tensor]], clipping_type: str,
-                            clipping_threshold: float):
+                            clipping_threshold: float) -> None:
     """Clips all gradients in model based on specified clipping_type.
 
     Args:
@@ -36,6 +38,7 @@ def apply_gradient_clipping(parameters: Union[torch.Tensor, Iterable[torch.Tenso
             threshold by which if grad_norm / weight_norm is greater than this threshold then
             scale gradients by this threshold * (weight_norm / grad_norm) (for 'adaptive').
     """
+    result = None
     if clipping_type == 'adaptive':
         _apply_agc(parameters, clipping_threshold=clipping_threshold)
     elif clipping_type == 'norm':
@@ -43,7 +46,9 @@ def apply_gradient_clipping(parameters: Union[torch.Tensor, Iterable[torch.Tenso
     elif clipping_type == 'value':
         torch.nn.utils.clip_grad_value_(parameters, clip_value=clipping_threshold)
     else:
-        raise ValueError(f"clipping_type must be 'adaptive', 'norm', or 'value' not {clipping_type} ")
+        raise ValueError(
+            f"clipping_type must be 'adaptive', 'norm', 'online_percentile_estimate', or 'value' not {clipping_type} ")
+    return result
 
 
 def _apply_agc(
@@ -95,7 +100,7 @@ class GradientClipping(Algorithm):
             )
 
     Args:
-        clipping_type ('adaptive', 'norm', 'value'): String denoting which type of
+        clipping_type ('adaptive', 'norm', 'value', 'online_percentile_estimate'): String denoting which type of
             gradient clipping to do. The options are: 'norm', which clips the gradient norm
             and uses `torch.nn.utils.clip_grad_norm_`, 'value', which clips gradient at
             a specified value and uses `torch.nn.utils.clip_grad_value_`, and 'adaptive',
@@ -111,9 +116,22 @@ class GradientClipping(Algorithm):
         ValueError: if deepspeed is enabled and clipping_type is not 'norm'.
     """
 
-    def __init__(self, clipping_type: str, clipping_threshold: float):
+    def __init__(self,
+                 clipping_type: str,
+                 clipping_threshold: float,
+                 warmup_steps: Optional[int] = None,
+                 norm_type: Optional[str] = None):
         self.clipping_type = clipping_type
         self.clipping_threshold = clipping_threshold
+        if self.clipping_type == 'online_percentile_estimate':
+            self.parameter_grad_percentile_estimates = {}
+            self.warmup_steps = warmup_steps if warmup_steps else 0
+            self.norm_type = norm_type if norm_type else 'unitwise'
+            assert clipping_threshold >= 0 and clipping_threshold <= 1.0 and 'online percentile estimate requires the threshold be a percentile between 0 and 1'
+        else:
+            self.parameter_grad_percentile_estimates = None
+            self.warmup_steps = None
+            self.norm_type = None
 
     def match(self, event: Event, state: State) -> bool:
         return event in [Event.INIT, Event.AFTER_TRAIN_BATCH]
@@ -132,9 +150,15 @@ class GradientClipping(Algorithm):
                     f"Deepspeed only supports gradient clipping of type 'norm' not of type '{self.clipping_type}'")
 
         if event == Event.AFTER_TRAIN_BATCH and not state.deepspeed_enabled:
-            apply_gradient_clipping(parameters=state.model.parameters(),
-                                    clipping_type=self.clipping_type,
-                                    clipping_threshold=self.clipping_threshold)
+            if self.clipping_type == 'online_percentile_estimate':
+                self.parameter_grad_percentile_estimates = apply_ope_gc(state.model.named_parameters(),
+                                                                        self.clipping_threshold,
+                                                                        self.parameter_grad_percentile_estimates,
+                                                                        self.warmup_steps, self.norm_type)
+            else:
+                apply_gradient_clipping(parameters=state.model.parameters(),
+                                        clipping_type=self.clipping_type,
+                                        clipping_threshold=self.clipping_threshold)
 
 
 def _get_clipped_gradient_coeff(weights: torch.Tensor, grad: torch.Tensor, clipping_threshold: float = 0.01):
@@ -161,8 +185,8 @@ def _get_clipped_gradient_coeff(weights: torch.Tensor, grad: torch.Tensor, clipp
     """
 
     # Compute and clamp grad and weight norms.
-    w_norm = _unitwise_norm(weights)
-    grad_norm = _unitwise_norm(grad)
+    w_norm = unitwise_norm(weights)
+    grad_norm = unitwise_norm(grad)
 
     # Gradients whose norms are greater than weight_norm * clipping_threhsold are
     # scaled down by (weight_norm * clipping_threhsold) / grad_norm.
@@ -170,31 +194,3 @@ def _get_clipped_gradient_coeff(weights: torch.Tensor, grad: torch.Tensor, clipp
     clipped_grad_coeff = max_norm.div_(grad_norm).nan_to_num_(nan=1.0).clamp_(max=1.0)
 
     return clipped_grad_coeff
-
-
-def _unitwise_norm(tensor: torch.Tensor):
-    """Implements unitwise norm as described in Brock et al, 2021.
-
-    For 0D scalars of shape [], we trivially normalize with dim=0 which essentially returns the absolute value of the scalar.
-    For 1D *.bias weights of shape [out_features], we normalize across entire vector -> dim=0.
-    For 2D torch.nn.Linear weights of shape [out_features, in_features]: we normalize across in_features -> dim = 1
-    For 4D torch.nn.Conv2d weights [out_channels, in_channels, kernel_height, kernel_width]:
-        we normalize across [in_channels, kernel_height, kernel_width] -> dim = (1, 2, 3).
-    If a 3D parameter were somehow in your model, we would normalize buy the last two dimensions -> dim = (1,2).
-
-    Args:
-        tensor (torch.Tensor): A parameter or gradient of the model.
-
-    Returns:
-        The appropriate L2 norm of the parameter or gradient as described above.
-    """
-    # 0D for scalars, 1D for bias vectors.
-    if tensor.ndim <= 1:
-        dim = 0
-        keepdim = False
-    # 2D corresponds to MLPs and 4D corresponds to ConvNets.
-    else:
-        dim = tuple(range(1, tensor.ndim))
-        keepdim = True
-    # L2 Norm.
-    return torch.linalg.vector_norm(tensor, ord=2, dim=dim, keepdim=keepdim)
