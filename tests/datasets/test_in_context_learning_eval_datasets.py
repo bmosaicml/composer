@@ -20,13 +20,45 @@ def test_get_lm_task_dataloader(dataset_uri):
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
     dataset_uri = f'{local_data}/{dataset_uri}'
     tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
-    dl = get_lm_task_dataloader(dataset_uri, tokenizer, 2, max_seq_len=2048, eos_tok_id=tokenizer.eos_token_id)
+    dl = get_lm_task_dataloader(dataset_uri,
+                                tokenizer,
+                                2,
+                                max_seq_len=2048,
+                                eos_tok_id=tokenizer.eos_token_id,
+                                num_fewshot=0,
+                                preamble_string='',
+                                example_delimiter='\n',
+                                continuation_delimiter='')
     evaluator = Evaluator(label='lambada', dataloader=dl, metric_names=['InContextLearningLMAccuracy'])
     model = create_gpt2(use_pretrained=True, pretrained_model_name='EleutherAI/gpt-neo-125M')
     trainer = Trainer(model=model, max_duration='1ep', loggers=in_memory_logger)
     trainer.eval(eval_dataloader=evaluator)
     assert 'metrics/lambada/InContextLearningLMAccuracy' in in_memory_logger.data.keys()
     assert in_memory_logger.data['metrics/lambada/InContextLearningLMAccuracy'][0][1].item() == 0.4375
+
+
+@pytest.mark.parametrize('dataset_uri', ['lambada_small.jsonz'])
+@pytest.mark.parametrize('num_fewshot', [1, 5, 10])
+def test_get_lm_task_dataloader_fewshot(dataset_uri, num_fewshot):
+    in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
+    local_data = os.path.join(os.path.dirname(__file__), 'local_data')
+    dataset_uri = f'{local_data}/{dataset_uri}'
+    tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
+    dl = get_lm_task_dataloader(dataset_uri,
+                                tokenizer,
+                                2,
+                                max_seq_len=2048,
+                                eos_tok_id=tokenizer.eos_token_id,
+                                num_fewshot=num_fewshot,
+                                preamble_string='',
+                                example_delimiter='\n',
+                                continuation_delimiter='')
+    evaluator = Evaluator(label='lambada', dataloader=dl, metric_names=['InContextLearningLMAccuracy'])
+    model = create_gpt2(use_pretrained=True, pretrained_model_name='EleutherAI/gpt-neo-125M')
+    trainer = Trainer(model=model, max_duration='1ep', loggers=in_memory_logger)
+    trainer.eval(eval_dataloader=evaluator)
+    assert 'metrics/lambada/InContextLearningLMAccuracy' in in_memory_logger.data.keys()
+    assert in_memory_logger.data['metrics/lambada/InContextLearningLMAccuracy'][0][1].item() >= 0.125
 
 
 @pytest.mark.parametrize('dataset_uri', ['lambada_small.jsonz'])
@@ -37,7 +69,17 @@ def test_get_lm_task_dataloader_gpu(device, world_size, dataset_uri):
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
     dataset_uri = f'{local_data}/{dataset_uri}'
     tokenizer = transformers.AutoTokenizer.from_pretrained('gpt2')
-    dl = get_lm_task_dataloader(dataset_uri, tokenizer, 2, max_seq_len=2048, eos_tok_id=tokenizer.eos_token_id)
+    dl = get_lm_task_dataloader(
+        dataset_uri,
+        tokenizer,
+        2,
+        max_seq_len=2048,
+        eos_tok_id=tokenizer.eos_token_id,
+        num_fewshot=0,
+        preamble_string="",
+        example_delimiter='\n',
+        continuation_delimiter=""
+    )
     evaluator = Evaluator(label='lambada', dataloader=dl, metric_names=['InContextLearningLMAccuracy'])
     model = create_gpt2(use_pretrained=True, pretrained_model_name='EleutherAI/gpt-neo-125M')
     trainer = Trainer(model=model, max_duration='1ep', loggers=in_memory_logger)
