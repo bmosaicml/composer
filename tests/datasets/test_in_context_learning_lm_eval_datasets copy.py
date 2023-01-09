@@ -4,7 +4,6 @@
 import os
 
 import pytest
-import transformers
 
 from composer.core import Evaluator
 from composer.datasets.in_context_learning_language_modeling_evaluation import get_lm_task_dataloader
