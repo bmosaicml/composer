@@ -284,8 +284,8 @@ class DecoupledAdamW(AdamW):
 
             exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
 
-    def turn_on_masking(self, param):
-        self.state[param]['mask'] = True
+    def set_masking(self, param, val):
+        self.state[param]['mask'] = val
 
     @torch.no_grad()
     def step(self, closure=None):
