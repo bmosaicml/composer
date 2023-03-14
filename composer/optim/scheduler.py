@@ -472,6 +472,72 @@ class CosineAnnealingWarmRestartsScheduler(ComposerScheduler):
         return _cosine_anneal(x=frac_of_current_interval, min_y=self.alpha_f)
 
 
+class CosineAnnealingWarmupWithRestartsScheduler(ComposerScheduler):
+    r"""Cyclically decays the learning rate according to the decreasing part of a cosine curve.
+
+    .. seealso::
+        This scheduler is based on :class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` from PyTorch.
+
+    This scheduler resembles a regular cosine annealing curve, as seen in :class:`~.CosineAnnealingScheduler`, except
+    that after the curve first completes ``t_0`` time, the curve resets to the start. The durations of subsequent cycles
+    are each multiplied by ``t_mult``.
+
+    Specifically, the learning rate multiplier :math:`\alpha` can be expressed as:
+
+    .. math::
+        \alpha(t) = \alpha_f + (1 - \alpha_f) \times \frac{1}{2}(1 + \cos(\pi \times \tau_i))
+
+    Given :math:`\tau_i`, the fraction of time elapsed through the :math:`i^\text{th}` cycle, as:
+
+    .. math::
+        \tau_i = (t - \sum_{j=0}^{i-1} t_0 t_{mult}^j) / (t_0 t_{mult}^i)
+
+    Where :math:`t_0`
+    represents the period of the first cycle, :math:`t_{mult}` represents the multiplier for the duration of successive
+    cycles, and :math:`\alpha_f` represents the learning rate multiplier to decay to.
+
+    Args:
+        t_0 (str | Time): The period of the first cycle.
+        t_mult (float): The multiplier for the duration of successive cycles. Default = ``1.0``.
+        alpha_f (float): Learning rate multiplier to decay to. Default = ``0.0``.
+    """
+
+    def __init__(
+        self,
+        t_0: Union[str, Time],
+        warmup_frac: float,
+        t_mult: float = 1.0,
+        alpha_f: float = 0.0,
+    ):
+        self.t_0 = t_0
+        self.t_mult = t_mult
+        self.alpha_f = alpha_f
+        self.warmup_frac = warmup_frac
+
+    def __call__(self, state: State, ssr: float = 1.0):
+
+        t_0 = _convert_time(self.t_0, state, ssr=ssr)
+        current_interval_len = t_0
+        current_interval_end = t_0
+        while current_interval_end <= state.timestamp.get(current_interval_end.unit):
+            if current_interval_len.value == 0:
+                raise ValueError(
+                    'Interval between restarts for cosine annealing/warm restarts scheduler has decayed to 0.')
+
+            current_interval_len = Time(value=int(self.t_mult * current_interval_len.value),
+                                        unit=current_interval_len.unit)
+            current_interval_end += current_interval_len
+
+        current_interval_start = current_interval_end - current_interval_len
+        frac_of_current_interval = ((state.timestamp.get(t_0.unit) - current_interval_start) /
+                                    current_interval_len).value
+
+        if frac_of_current_interval <= self.warmup_frac and self.warmup_frac > 0:
+            return frac_of_current_interval / self.warmup_frac
+        else:
+            return _cosine_anneal(x=frac_of_current_interval, min_y=self.alpha_f)
+
+
 class PolynomialScheduler(ComposerScheduler):
     r"""Sets the learning rate to be proportional to a power of the fraction of training time left.
 

@@ -11,10 +11,10 @@ from composer.core import State, Time
 from composer.core.time import TimeUnit
 from composer.devices import DeviceCPU, DeviceGPU
 from composer.optim.scheduler import (ComposerScheduler, ConstantWithWarmupScheduler, CosineAnnealingScheduler,
-                                      CosineAnnealingWarmRestartsScheduler, CosineAnnealingWithWarmupScheduler,
-                                      ExponentialScheduler, LinearScheduler, LinearWithWarmupScheduler,
-                                      MultiStepScheduler, MultiStepWithWarmupScheduler, PolynomialScheduler,
-                                      PolynomialWithWarmupScheduler, StepScheduler)
+                                      CosineAnnealingWarmRestartsScheduler, CosineAnnealingWarmupWithRestartsScheduler,
+                                      CosineAnnealingWithWarmupScheduler, ExponentialScheduler, LinearScheduler,
+                                      LinearWithWarmupScheduler, MultiStepScheduler, MultiStepWithWarmupScheduler,
+                                      PolynomialScheduler, PolynomialWithWarmupScheduler, StepScheduler)
 from composer.trainer.trainer import Trainer
 from tests.common.datasets import RandomClassificationDataset
 from tests.common.models import SimpleModel
