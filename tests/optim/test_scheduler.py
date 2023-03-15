@@ -109,6 +109,10 @@ def dummy_schedulers_state(rank_zero_seed: int, request: pytest.FixtureRequest):
     pytest.param(LinearWithWarmupScheduler(t_warmup='500ba', scale_warmup=True), 0.5,
                  ['0ba', '125ba', '250ba', '249875ba'], [0.0, 0.5, 1.0, 0.5]),
     pytest.param(LinearWithWarmupScheduler(t_warmup='1000ep'), 1.0, ['0ep', '100ep', '1000ep'], [0.0, 0.1, 1.0]),
+    
+     pytest.param(CosineAnnealingWarmupWithRestartsScheduler(t_0='0.003dur', warmup_frac=0.05), 1.0,
+                 ['0ba', '450000ba', '900000ba', '933333ba', '950000ba', '1000000ba'], [0.0, 0.5, 1.0, 0.75, 0.5, 0.0]),
+    
     pytest.param(CosineAnnealingWithWarmupScheduler(t_warmup='0.9dur'), 1.0,
                  ['0ba', '450000ba', '900000ba', '933333ba', '950000ba', '1000000ba'], [0.0, 0.5, 1.0, 0.75, 0.5, 0.0]),
     pytest.param(CosineAnnealingWithWarmupScheduler(t_warmup='0.9dur', alpha_f=0.5), 0.01,

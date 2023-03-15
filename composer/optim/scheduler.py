@@ -515,7 +515,6 @@ class CosineAnnealingWarmupWithRestartsScheduler(ComposerScheduler):
         self.warmup_frac = warmup_frac
 
     def __call__(self, state: State, ssr: float = 1.0):
-
         t_0 = _convert_time(self.t_0, state, ssr=ssr)
         current_interval_len = t_0
         current_interval_end = t_0
@@ -533,9 +532,17 @@ class CosineAnnealingWarmupWithRestartsScheduler(ComposerScheduler):
                                     current_interval_len).value
 
         if frac_of_current_interval <= self.warmup_frac and self.warmup_frac > 0:
-            return frac_of_current_interval / self.warmup_frac
+            warmup_mult = frac_of_current_interval / self.warmup_frac
         else:
-            return _cosine_anneal(x=frac_of_current_interval, min_y=self.alpha_f)
+            warmup_mult = 1.0
+
+
+        t_max = _convert_time('1dur', state, ssr=ssr)
+        frac_of_total = (state.timestamp.get(t_0.unit) / t_max).value
+        frac_of_total = min(1.0, frac_of_total)
+
+        
+        return warmup_mult * _cosine_anneal(x=frac_of_total, min_y=self.alpha_f)
 
 
 class PolynomialScheduler(ComposerScheduler):
