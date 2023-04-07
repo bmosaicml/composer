@@ -8,7 +8,8 @@ import torch
 from torch.nn.functional import cross_entropy
 
 from composer.metrics.nlp import (BinaryF1Score, HFCrossEntropy, InContextLearningLMAccuracy,
-                                  InContextLearningLMExpectedCalibrationError, InContextLearningMultipleChoiceAccuracy,
+                                  InContextLearningLMExpectedCalibrationError,
+                                  InContextLearningMCExpectedCalibrationError, InContextLearningMultipleChoiceAccuracy,
                                   InContextLearningQAAccuracy, LanguageCrossEntropy, LanguagePerplexity, MaskedAccuracy,
                                   Perplexity)
 
@@ -351,3 +352,49 @@ def test_in_context_learning_mc_accuracy(tiny_gpt2_tokenizer):
 
     metric.update(batch, logits, batch['labels'])
     assert metric.compute() == 0.5
+
+
+def test_in_context_learning_mc_ece(tiny_gpt2_tokenizer):
+    contexts = [
+        'Q: How do you cook a cake?', 'Q: How do you cook a cake?', 'Q: How old is the earth?',
+        'Q: How old is the earth?'
+    ]
+    continuations = [' A: turn on the oven', ' A: do a backflip', ' A: 2 minutes', ' A: 4.5 billion years']
+    gold_indices = [0, 1]
+    choice_groupings = [(0, 2), (2, 4)]
+    pad = tiny_gpt2_tokenizer.pad_token_id
+    inputs = [
+        tiny_gpt2_tokenizer(context)['input_ids'] + tiny_gpt2_tokenizer(continuation)['input_ids']
+        for context, continuation in zip(contexts, continuations)
+    ]
+    inputs = torch.tensor([input + [pad] * (2048 - len(input)) for input in inputs])
+
+    cont_idxs = []
+    for context, continuation in zip(contexts, continuations):
+        start = len(tiny_gpt2_tokenizer(context)['input_ids'])
+        end = start + len(tiny_gpt2_tokenizer(continuation)['input_ids'])
+        cont_idxs.append(torch.tensor(list(range(start, end))))
+
+    batch = {
+        'continuation_indices': cont_idxs,
+        'labels': inputs,
+        'input_ids': inputs,
+        'gold_indices': gold_indices,
+        'choice_groupings': choice_groupings
+    }
+    logits = 0.75 * torch.nn.functional.one_hot(inputs, num_classes=pad + 1).float()
+
+    # for the first two, the correct answer is continuation 0
+    # make the answer correct by making continuation 0 more likely for both answers
+    start, end = cont_idxs[1].tolist()[0], cont_idxs[1].tolist()[-1]
+    logits[1][start:end] = logits[0][start:end].clone()
+
+    # for the last two, the correct answer is continuation 3
+    # make the answer incorrect by making continuation 2 more likely for both answers
+    start, end = cont_idxs[3].tolist()[0], cont_idxs[3].tolist()[-1]
+    logits[3][start:end] = logits[2][start:end].clone()
+
+    metric = InContextLearningMCExpectedCalibrationError()
+
+    metric.update(batch, logits, batch['labels'])
+    assert metric.compute() == 0.25
