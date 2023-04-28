@@ -255,6 +255,47 @@ def test_lm_task_dataloader_opt_tokenizer(dataset_uri, num_fewshot, tmp_path):
     assert tokenizer.decode(batch['input_ids'][0][0:min_idx]).count('</s>') == 1
 
 
+@pytest.mark.parametrize('dataset_uri', ['jeopardy_small.jsonl'])
+@pytest.mark.parametrize('num_fewshot', [0, 5])
+def test_lm_task_dataloader_llama_tokenizer(dataset_uri, num_fewshot, tmp_path):
+    pytest.importorskip('datasets')
+
+    local_data = os.path.join(os.path.dirname(__file__), 'local_data')
+
+    tokenizer = AutoTokenizer.from_pretrained('huggyllama/llama-7b', use_fast=False)
+    dataset_uri = f'{local_data}/{dataset_uri}'
+    batch_size = 2
+    seqlen = 2048
+    dl = get_icl_task_dataloader('language_modeling',
+                                 dataset_uri,
+                                 tokenizer,
+                                 batch_size,
+                                 max_seq_len=seqlen,
+                                 pad_tok_id=tokenizer.eos_token_id,
+                                 num_fewshot=num_fewshot,
+                                 prompt_string='',
+                                 example_delimiter='\n',
+                                 continuation_delimiter=' Answer: ',
+                                 destination_path=str(tmp_path / 'icl.jsonl'))
+    assert isinstance(dl, DataSpec)
+    assert isinstance(dl.dataloader, DataLoader)  # pyright
+    batch = next(dl.dataloader._get_iterator())
+    assert 'input_ids' in batch
+    assert tuple(batch['input_ids'].shape) == (batch_size, seqlen)
+    assert 'attention_mask' in batch
+    assert tuple(batch['attention_mask'].shape) == (batch_size, seqlen)
+    assert 'continuation_indices' in batch
+    assert isinstance(batch['continuation_indices'], list) and len(batch['continuation_indices']) == batch_size
+    assert 'mode' in batch
+    assert batch['mode'] == 'icl_task'
+    min_idx = min(batch['continuation_indices'][0]).item()
+    max_idx = max(batch['continuation_indices'][0]).item()
+    assert tokenizer.decode(batch['input_ids'][0][min_idx:max_idx + 1]) == 'Admiral Richard Byrd'
+    assert tokenizer.decode(batch['input_ids'][0][0:min_idx]).startswith('<s>')
+    assert tokenizer.decode(batch['input_ids'][0][0:min_idx]).count('<s>') == 1
+
+
+
 @pytest.mark.parametrize('dataset_uri', ['piqa_small.jsonl'])
 @pytest.mark.parametrize('num_fewshot', [0, 1])
 def test_mc_task_dataloader_opt_tokenizer(dataset_uri, num_fewshot, tmp_path):
@@ -439,9 +480,48 @@ def test_lm_task_evaluation(device, dataset_uri, num_fewshot, tiny_gpt2_tokenize
     assert 'metrics/lambada/InContextLearningLMAccuracy' in in_memory_logger.data.keys()
     assert in_memory_logger.data['metrics/lambada/InContextLearningLMAccuracy'][0][1].item() == 0
 
+@pytest.mark.parametrize('dataset_uri', ['jeopardy_small.jsonl'])
+@pytest.mark.parametrize('num_fewshot', [0, 5])
+@device('gpu')
+def test_lm_task_evaluation_llama_tokenizer(device, dataset_uri, num_fewshot, tmp_path):
+    pytest.importorskip('datasets')
+    in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
+    local_data = os.path.join(os.path.dirname(__file__), 'local_data')
+    dataset_uri = f'{local_data}/{dataset_uri}'
+    tokenizer = AutoTokenizer.from_pretrained('huggyllama/llama-7b', use_fast=False)
+    dl = get_icl_task_dataloader(
+        'language_modeling',
+        dataset_uri,
+        tokenizer,
+        2,
+        max_seq_len=2048,
+        pad_tok_id=tokenizer.eos_token_id,
+        num_fewshot=num_fewshot,
+        prompt_string='',
+        example_delimiter='\n',
+        continuation_delimiter=' Answer: ',
+        destination_path=str(tmp_path / 'icl.jsonl'),
+    )
+
+    evaluator = Evaluator(label='lambada', dataloader=dl, metric_names=['InContextLearningLMAccuracy'])
+
+    config = transformers.AutoConfig.from_pretrained('huggyllama/llama-7b')
+    model = transformers.AutoModelForCausalLM.from_config(config)
+    model = HuggingFaceModel(
+        model=model,
+        tokenizer=tokenizer,
+        eval_metrics=[InContextLearningLMAccuracy()],
+        use_logits=True,
+    )
+
+    trainer = Trainer(model=model, max_duration='1ep', loggers=in_memory_logger)
+    trainer.eval(eval_dataloader=evaluator, subset_num_batches=2)
+    assert 'metrics/lambada/InContextLearningLMAccuracy' in in_memory_logger.data.keys()
+    breakpoint()
+    assert in_memory_logger.data['metrics/lambada/InContextLearningLMAccuracy'][0][1].item() == 0
 
 @pytest.mark.parametrize('dataset_uri', ['winograd_small.jsonl'])
-@device('cpu')
+@device('gpu')
 @pytest.mark.parametrize('num_fewshot', [0, 5])
 def test_schema_task_evaluation(device, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tmp_path, tiny_gpt2_model):
     pytest.importorskip('datasets')
