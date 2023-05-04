@@ -690,7 +690,6 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
 
         examples = []
         for sample_idx in tqdm(range(len(self.samples))):
-
             preamble = prompt_string
             if num_fewshot > 0:
                 fewshot_idxs = _get_fewshot_sample_idxs(len(self.samples), num_fewshot, sample_idx, fewshot_rng)
@@ -708,7 +707,6 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
 
             # rstrip the continuation delimiter, because the prompt ending in a space results in degenerate output
             continuation_delimiter_stripped = continuation_delimiter.rstrip()
-
             if len(preamble) > 0:
                 context_options = [f'{example_delimiter}{c}{continuation_delimiter_stripped}' for c in context_options]
             encoded_example['preamble'] = self.tokenizer(
@@ -720,11 +718,11 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
                 encoded_example['preamble']['input_ids'] = encoded_example['preamble']['input_ids'][:-1]
 
             encoded_example['gold_idx'] = gold_idx
-            encoded_example['context_options'] = [self.tokenizer(c, add_special_tokens=False) for c in context_options]
+            encoded_example['context_options'] = [self.tokenizer(c, add_special_tokens=False, add_dummy_prefix=False) for c in context_options]
 
             if self.prefix_space:
                 continuation = f' {continuation}' if not continuation.startswith(' ') else continuation
-            encoded_example['continuation'] = self.tokenizer(continuation, add_special_tokens=False)
+            encoded_example['continuation'] = self.tokenizer(continuation, add_special_tokens=False, add_dummy_prefix=False)
             examples.append(encoded_example)
 
         return examples
